@@ -10,7 +10,6 @@ import android.support.annotation.Nullable;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-
 import com.afollestad.easyvideoplayer.EasyVideoCallback;
 import com.afollestad.easyvideoplayer.EasyVideoPlayer;
 import com.afollestad.materialcamera.R;
@@ -20,173 +19,158 @@ import com.afollestad.materialdialogs.MaterialDialog;
 /**
  * @author Aidan Follestad (afollestad)
  */
-public class PlaybackVideoFragment extends Fragment implements CameraUriInterface, EasyVideoCallback {
+public class PlaybackVideoFragment extends Fragment
+    implements CameraUriInterface, EasyVideoCallback {
 
-    private EasyVideoPlayer mPlayer;
-    private String mOutputUri;
-    private BaseCaptureInterface mInterface;
+  private EasyVideoPlayer mPlayer;
+  private String mOutputUri;
+  private BaseCaptureInterface mInterface;
 
-    private Handler mCountdownHandler;
-    private final Runnable mCountdownRunnable = new Runnable() {
-        @Override
-        public void run() {
-            if (mPlayer != null) {
-                long diff = mInterface.getRecordingEnd() - System.currentTimeMillis();
-                if (diff <= 0) {
-                    useVideo();
-                    return;
-                }
-                mPlayer.setBottomLabelText(String.format("-%s", CameraUtil.getDurationString(diff)));
-                if (mCountdownHandler != null)
-                    mCountdownHandler.postDelayed(mCountdownRunnable, 200);
-            }
+  private Handler mCountdownHandler;
+  private final Runnable mCountdownRunnable = new Runnable() {
+    @Override public void run() {
+      if (mPlayer != null) {
+        long diff = mInterface.getRecordingEnd() - System.currentTimeMillis();
+        if (diff <= 0) {
+          useVideo();
+          return;
         }
-    };
+        mPlayer.setBottomLabelText(String.format("-%s", CameraUtil.getDurationString(diff)));
+        if (mCountdownHandler != null) mCountdownHandler.postDelayed(mCountdownRunnable, 200);
+      }
+    }
+  };
 
-    @SuppressWarnings("deprecation")
-    @Override
-    public void onAttach(Activity activity) {
-        super.onAttach(activity);
-        mInterface = (BaseCaptureInterface) activity;
+  @SuppressWarnings("deprecation") @Override public void onAttach(Activity activity) {
+    super.onAttach(activity);
+    mInterface = (BaseCaptureInterface) activity;
+  }
+
+  public static PlaybackVideoFragment newInstance(String outputUri, boolean allowRetry,
+      int primaryColor) {
+    PlaybackVideoFragment fragment = new PlaybackVideoFragment();
+    fragment.setRetainInstance(true);
+    Bundle args = new Bundle();
+    args.putString("output_uri", outputUri);
+    args.putBoolean(CameraIntentKey.ALLOW_RETRY, allowRetry);
+    args.putInt(CameraIntentKey.PRIMARY_COLOR, primaryColor);
+    fragment.setArguments(args);
+    return fragment;
+  }
+
+  @Override public void onResume() {
+    super.onResume();
+    if (getActivity() != null) {
+      getActivity().setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+    }
+  }
+
+  @Override public void onPause() {
+    super.onPause();
+    if (mPlayer != null) {
+      mPlayer.release();
+      mPlayer.reset();
+      mPlayer = null;
+    }
+  }
+
+  @Nullable @Override public View onCreateView(LayoutInflater inflater, ViewGroup container,
+      Bundle savedInstanceState) {
+    return inflater.inflate(R.layout.mcam_fragment_videoplayback, container, false);
+  }
+
+  @Override public void onViewCreated(View view, Bundle savedInstanceState) {
+    super.onViewCreated(view, savedInstanceState);
+
+    mPlayer = (EasyVideoPlayer) view.findViewById(R.id.playbackView);
+    mPlayer.setCallback(this);
+
+    mPlayer.setSubmitTextRes(mInterface.labelConfirm());
+    mPlayer.setRetryTextRes(mInterface.labelRetry());
+    mPlayer.setPlayDrawableRes(mInterface.iconPlay());
+    mPlayer.setPauseDrawableRes(mInterface.iconPause());
+
+    if (getArguments().getBoolean(CameraIntentKey.ALLOW_RETRY, true)) {
+      mPlayer.setLeftAction(EasyVideoPlayer.LEFT_ACTION_RETRY);
+    }
+    mPlayer.setRightAction(EasyVideoPlayer.RIGHT_ACTION_SUBMIT);
+
+    mPlayer.setThemeColor(getArguments().getInt(CameraIntentKey.PRIMARY_COLOR));
+    mOutputUri = getArguments().getString("output_uri");
+
+    if (mInterface.hasLengthLimit() && mInterface.shouldAutoSubmit()
+        && mInterface.continueTimerInPlayback()) {
+      final long diff = mInterface.getRecordingEnd() - System.currentTimeMillis();
+      mPlayer.setBottomLabelText(String.format("-%s", CameraUtil.getDurationString(diff)));
+      startCountdownTimer();
     }
 
-    public static PlaybackVideoFragment newInstance(String outputUri, boolean allowRetry, int primaryColor) {
-        PlaybackVideoFragment fragment = new PlaybackVideoFragment();
-        fragment.setRetainInstance(true);
-        Bundle args = new Bundle();
-        args.putString("output_uri", outputUri);
-        args.putBoolean(CameraIntentKey.ALLOW_RETRY, allowRetry);
-        args.putInt(CameraIntentKey.PRIMARY_COLOR, primaryColor);
-        fragment.setArguments(args);
-        return fragment;
+    mPlayer.setSource(Uri.parse(mOutputUri));
+  }
+
+  private void startCountdownTimer() {
+    if (mCountdownHandler == null) {
+      mCountdownHandler = new Handler();
+    } else {
+      mCountdownHandler.removeCallbacks(mCountdownRunnable);
     }
+    mCountdownHandler.post(mCountdownRunnable);
+  }
 
-    @Override
-    public void onResume() {
-        super.onResume();
-        if (getActivity() != null)
-            getActivity().setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+  @Override public void onDestroyView() {
+    super.onDestroyView();
+    if (mCountdownHandler != null) {
+      mCountdownHandler.removeCallbacks(mCountdownRunnable);
+      mCountdownHandler = null;
     }
-
-    @Override
-    public void onPause() {
-        super.onPause();
-        if (mPlayer != null) {
-            mPlayer.release();
-            mPlayer.reset();
-            mPlayer = null;
-        }
+    if (mPlayer != null) {
+      mPlayer.release();
+      mPlayer = null;
     }
+  }
 
-    @Nullable
-    @Override
-    public View onCreateView(LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState) {
-        return inflater.inflate(R.layout.mcam_fragment_videoplayback, container, false);
+  private void useVideo() {
+    if (mPlayer != null) {
+      mPlayer.release();
+      mPlayer = null;
     }
+    if (mInterface != null) mInterface.useMedia(mOutputUri);
+  }
 
-    @Override
-    public void onViewCreated(View view, Bundle savedInstanceState) {
-        super.onViewCreated(view, savedInstanceState);
+  @Override public String getOutputUri() {
+    return getArguments().getString("output_uri");
+  }
 
-        mPlayer = (EasyVideoPlayer) view.findViewById(R.id.playbackView);
-        mPlayer.setCallback(this);
+  @Override public void onStarted(EasyVideoPlayer player) {
+  }
 
-        mPlayer.setSubmitTextRes(mInterface.labelConfirm());
-        mPlayer.setRetryTextRes(mInterface.labelRetry());
-        mPlayer.setPlayDrawableRes(mInterface.iconPlay());
-        mPlayer.setPauseDrawableRes(mInterface.iconPause());
+  @Override public void onPaused(EasyVideoPlayer player) {
+  }
 
-        if (getArguments().getBoolean(CameraIntentKey.ALLOW_RETRY, true))
-            mPlayer.setLeftAction(EasyVideoPlayer.LEFT_ACTION_RETRY);
-        mPlayer.setRightAction(EasyVideoPlayer.RIGHT_ACTION_SUBMIT);
+  @Override public void onPreparing(EasyVideoPlayer player) {
+  }
 
-        mPlayer.setThemeColor(getArguments().getInt(CameraIntentKey.PRIMARY_COLOR));
-        mOutputUri = getArguments().getString("output_uri");
+  @Override public void onPrepared(EasyVideoPlayer player) {
+  }
 
-        if (mInterface.hasLengthLimit() && mInterface.shouldAutoSubmit() && mInterface.continueTimerInPlayback()) {
-            final long diff = mInterface.getRecordingEnd() - System.currentTimeMillis();
-            mPlayer.setBottomLabelText(String.format("-%s", CameraUtil.getDurationString(diff)));
-            startCountdownTimer();
-        }
+  @Override public void onBuffering(int percent) {
+  }
 
-        mPlayer.setSource(Uri.parse(mOutputUri));
-    }
+  @Override public void onError(EasyVideoPlayer player, Exception e) {
+    new MaterialDialog.Builder(getActivity()).title(R.string.mcam_error)
+        .content(e.getMessage())
+        .positiveText(android.R.string.ok)
+        .show();
+  }
 
-    private void startCountdownTimer() {
-        if (mCountdownHandler == null)
-            mCountdownHandler = new Handler();
-        else mCountdownHandler.removeCallbacks(mCountdownRunnable);
-        mCountdownHandler.post(mCountdownRunnable);
-    }
+  @Override public void onCompletion(EasyVideoPlayer player) {
+  }
 
-    @Override
-    public void onDestroyView() {
-        super.onDestroyView();
-        if (mCountdownHandler != null) {
-            mCountdownHandler.removeCallbacks(mCountdownRunnable);
-            mCountdownHandler = null;
-        }
-        if (mPlayer != null) {
-            mPlayer.release();
-            mPlayer = null;
-        }
-    }
+  @Override public void onRetry(EasyVideoPlayer player, Uri source) {
+    if (mInterface != null) mInterface.onRetry(mOutputUri);
+  }
 
-    private void useVideo() {
-        if (mPlayer != null) {
-            mPlayer.release();
-            mPlayer = null;
-        }
-        if (mInterface != null)
-            mInterface.useMedia(mOutputUri);
-    }
-
-    @Override
-    public String getOutputUri() {
-        return getArguments().getString("output_uri");
-    }
-
-    @Override
-    public void onStarted(EasyVideoPlayer player) {
-    }
-
-    @Override
-    public void onPaused(EasyVideoPlayer player) {
-    }
-
-    @Override
-    public void onPreparing(EasyVideoPlayer player) {
-    }
-
-    @Override
-    public void onPrepared(EasyVideoPlayer player) {
-    }
-
-    @Override
-    public void onBuffering(int percent) {
-    }
-
-    @Override
-    public void onError(EasyVideoPlayer player, Exception e) {
-        new MaterialDialog.Builder(getActivity())
-                .title(R.string.mcam_error)
-                .content(e.getMessage())
-                .positiveText(android.R.string.ok)
-                .show();
-    }
-
-    @Override
-    public void onCompletion(EasyVideoPlayer player) {
-    }
-
-    @Override
-    public void onRetry(EasyVideoPlayer player, Uri source) {
-        if (mInterface != null)
-            mInterface.onRetry(mOutputUri);
-    }
-
-    @Override
-    public void onSubmit(EasyVideoPlayer player, Uri source) {
-        useVideo();
-    }
+  @Override public void onSubmit(EasyVideoPlayer player, Uri source) {
+    useVideo();
+  }
 }

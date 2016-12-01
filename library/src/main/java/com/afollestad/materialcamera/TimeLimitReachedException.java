@@ -5,7 +5,7 @@ package com.afollestad.materialcamera;
  */
 public class TimeLimitReachedException extends Exception {
 
-    public TimeLimitReachedException() {
-        super("You've reached the time limit without starting a recording.");
-    }
+  public TimeLimitReachedException() {
+    super("You've reached the time limit without starting a recording.");
+  }
 }
